@@ -136,6 +136,8 @@ func serve() {
 
 		if res.StatusCode == 200 {
 			successCounter.Inc(1)
+		} else {
+			failureCounter.Inc(1)
 		}
 
 		// Dump response - optionally with body
