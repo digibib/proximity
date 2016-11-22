@@ -16,29 +16,27 @@ import (
 )
 
 var (
-	matchid = uint64(0)
-	connid  = uint64(0)
 	metricsInterval = flag.Int("m", 5, "Interval of metrics logging")
 	certFile    = flag.String("cert", "cert.pem", "A PEM eoncoded certificate file.")
 	keyFile     = flag.String("key", "key.pem", "A PEM encoded private key file.")
 	localAddr   = flag.String("l", ":9999", "local address")
 	remoteAddr  = flag.String("r", "http://localhost:80", "remote address")
 	onlyHeaders = flag.Bool("h", false, "dump only headers")
-	verbose     = flag.Bool("v", false, "display server actions")
 	noverify    = flag.Bool("no-verify", false, "Do not verify TLS/SSL certificates.")
-	colors      = flag.Bool("c", false, "output ansi colors")
 )
 
 func main() {
 	flag.Parse()
 
 	fmt.Printf("Proxying from %v to %v\n\n", *localAddr, *remoteAddr)
-	go metrics.Log(metrics.DefaultRegistry, time.Duration(*metricsInterval)*time.Second, log.New(os.Stderr, "", 0))
 	serve()
 }
 
 func serve() {
-	requestsCounter := metrics.GetOrRegisterCounter("numRequests", nil)
+	go metrics.Log(metrics.DefaultRegistry, time.Duration(*metricsInterval)*time.Second, log.New(os.Stderr, "", 0))
+	requestsCounter := metrics.GetOrRegisterCounter("numRequests", metrics.DefaultRegistry)
+	successCounter := metrics.GetOrRegisterCounter("successfulRequests", metrics.DefaultRegistry)
+	failureCounter := metrics.GetOrRegisterCounter("failedRequests", metrics.DefaultRegistry)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 
@@ -68,7 +66,7 @@ func serve() {
 		end.Scheme = target.Scheme
 
 		// Setup tls transport
-		var tlsConfig
+		var tlsConfig *tls.Config
 
 		if *noverify {
 			tlsConfig = &tls.Config{ InsecureSkipVerify: true }
@@ -126,13 +124,18 @@ func serve() {
 		// build response
 		var res *http.Response
 		res, err = client.Do(newreq)
-		defer res.Body.Close()
-
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to read response: %s\n", err)
 			w.WriteHeader(599)
+			failureCounter.Inc(1)
 			return
+		}
+
+		defer res.Body.Close()
+
+		if res.StatusCode == 200 {
+			successCounter.Inc(1)
 		}
 
 		// Dump response - optionally with body
