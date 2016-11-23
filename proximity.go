@@ -55,7 +55,7 @@ func serve() {
 			return
 		}
 
-		fmt.Printf("----- PARAMS ------\n")
+		fmt.Println("----- PARAMS ------")
 		args, _ := url.ParseQuery(req.URL.RawQuery)
 		for a, v := range args {
 			fmt.Fprintf(os.Stderr, "%s:\t%s\t\n", a, v[0])
@@ -95,7 +95,7 @@ func serve() {
 
 		// dump request
 		requestsCounter.Inc(1)
-		fmt.Printf("----- REQUEST ------\n")
+		fmt.Println("----- REQUEST ------")
 		if x, err := httputil.DumpRequestOut(newreq, !*onlyHeaders); err == nil {
 			fmt.Fprintf(os.Stderr, "%s\n", string(x))
 		}
@@ -113,7 +113,7 @@ func serve() {
 					}
 				}
 
-				fmt.Printf("----- REDIRECT ------\n")
+				fmt.Println("----- REDIRECT ------")
 				if x, err := httputil.DumpRequestOut(req, !*onlyHeaders); err == nil {
 					fmt.Fprintf(os.Stderr, "%s\n", string(x))
 				}
@@ -141,7 +141,7 @@ func serve() {
 		}
 
 		// Dump response - optionally with body
-		fmt.Printf("----- RESPONSE ------\n")
+		fmt.Println("----- RESPONSE ------")
 
 		if x, err := httputil.DumpResponse(res, !*onlyHeaders); err == nil {
 			fmt.Printf(string(x))
