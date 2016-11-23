@@ -1,28 +1,28 @@
 package main
 
 import (
-
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"net/http"
 	"os"
 	"time"
-	"log"
-	"io/ioutil"
+
 	metrics "github.com/rcrowley/go-metrics"
 )
 
 var (
 	metricsInterval = flag.Int("m", 5, "Interval of metrics logging")
-	certFile    = flag.String("cert", "cert.pem", "A PEM eoncoded certificate file.")
-	keyFile     = flag.String("key", "key.pem", "A PEM encoded private key file.")
-	localAddr   = flag.String("l", ":9999", "local address")
-	remoteAddr  = flag.String("r", "http://localhost:80", "remote address")
-	onlyHeaders = flag.Bool("h", false, "dump only headers")
-	noverify    = flag.Bool("no-verify", false, "Do not verify TLS/SSL certificates.")
+	certFile        = flag.String("cert", "cert.pem", "A PEM eoncoded certificate file.")
+	keyFile         = flag.String("key", "key.pem", "A PEM encoded private key file.")
+	localAddr       = flag.String("l", ":9999", "local address")
+	remoteAddr      = flag.String("r", "http://localhost:80", "remote address")
+	onlyHeaders     = flag.Bool("h", false, "dump only headers")
+	noverify        = flag.Bool("no-verify", false, "Do not verify TLS/SSL certificates.")
 )
 
 func main() {
@@ -57,7 +57,7 @@ func serve() {
 
 		fmt.Printf("----- PARAMS ------\n")
 		args, _ := url.ParseQuery(req.URL.RawQuery)
-		for a,v := range args {
+		for a, v := range args {
 			fmt.Fprintf(os.Stderr, "%s:\t%s\t\n", a, v[0])
 		}
 
@@ -69,7 +69,7 @@ func serve() {
 		var tlsConfig *tls.Config
 
 		if *noverify {
-			tlsConfig = &tls.Config{ InsecureSkipVerify: true }
+			tlsConfig = &tls.Config{InsecureSkipVerify: true}
 		} else {
 			// Load client cert
 			cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
@@ -86,7 +86,7 @@ func serve() {
 
 		// build destination request and copy headers
 		newreq, err := http.NewRequest(req.Method, end.String(), req.Body)
-		
+
 		for header, values := range req.Header {
 			for _, value := range values {
 				w.Header().Add(header, value)
