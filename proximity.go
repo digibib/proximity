@@ -29,145 +29,145 @@ func main() {
 	flag.Parse()
 
 	fmt.Printf("Proxying from %v to %v\n\n", *localAddr, *remoteAddr)
-	serve()
+
+	go metrics.Log(metrics.DefaultRegistry, time.Duration(*metricsInterval)*time.Second, log.New(os.Stderr, "", 0))
+
+	http.HandleFunc("/", proxy)
+	log.Fatal(http.ListenAndServe(*localAddr, nil))
 }
 
-func serve() {
-	go metrics.Log(metrics.DefaultRegistry, time.Duration(*metricsInterval)*time.Second, log.New(os.Stderr, "", 0))
+func proxy(w http.ResponseWriter, req *http.Request) {
+
 	requestsCounter := metrics.GetOrRegisterCounter("numRequests", metrics.DefaultRegistry)
 	successCounter := metrics.GetOrRegisterCounter("successfulRequests", metrics.DefaultRegistry)
 	failureCounter := metrics.GetOrRegisterCounter("failedRequests", metrics.DefaultRegistry)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+	end, err := url.Parse(req.URL.RequestURI())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse requested uri '%s': %s\n", req.URL, err)
+		w.WriteHeader(599)
+		return
+	}
 
-		end, err := url.Parse(req.URL.RequestURI())
+	// target for proxy
+	target, err := url.Parse(*remoteAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse url: %s\n", err)
+		w.WriteHeader(599)
+		return
+	}
+
+	fmt.Println("----- PARAMS ------")
+	args, _ := url.ParseQuery(req.URL.RawQuery)
+	for a, v := range args {
+		fmt.Fprintf(os.Stderr, "%s:\t%s\t\n", a, v[0])
+	}
+
+	// copy host + scheme to response
+	end.Host = target.Host
+	end.Scheme = target.Scheme
+
+	// Setup tls transport
+	var tlsConfig *tls.Config
+
+	if *noverify {
+		tlsConfig = &tls.Config{InsecureSkipVerify: true}
+	} else {
+		// Load client cert
+		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to parse requested uri '%s': %s\n", req.URL, err)
-			w.WriteHeader(599)
-			return
+			log.Fatal(err)
 		}
 
-		// target for proxy
-		target, err := url.Parse(*remoteAddr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to parse url: %s\n", err)
-			w.WriteHeader(599)
-			return
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
 		}
+		tlsConfig.BuildNameToCertificate()
+	}
+	transport := &http.Transport{TLSClientConfig: tlsConfig}
 
-		fmt.Println("----- PARAMS ------")
-		args, _ := url.ParseQuery(req.URL.RawQuery)
-		for a, v := range args {
-			fmt.Fprintf(os.Stderr, "%s:\t%s\t\n", a, v[0])
+	// build destination request and copy headers
+	newreq, err := http.NewRequest(req.Method, end.String(), req.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create HTTP request: %s\n", err)
+		w.WriteHeader(599)
+		return
+	}
+
+	for header, values := range req.Header {
+		for _, value := range values {
+			w.Header().Add(header, value)
 		}
+	}
 
-		// copy host + scheme to response
-		end.Host = target.Host
-		end.Scheme = target.Scheme
+	// dump request
+	requestsCounter.Inc(1)
+	fmt.Println("----- REQUEST ------")
+	if x, err := httputil.DumpRequestOut(newreq, !*onlyHeaders); err == nil {
+		fmt.Fprintf(os.Stderr, "%s\n", string(x))
+	}
 
-		// Setup tls transport
-		var tlsConfig *tls.Config
-
-		if *noverify {
-			tlsConfig = &tls.Config{InsecureSkipVerify: true}
-		} else {
-			// Load client cert
-			cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
-			if err != nil {
-				log.Fatal(err)
+	// Do real request
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 10 {
+				return fmt.Errorf("stopped after 10 redirects")
 			}
-
-			tlsConfig = &tls.Config{
-				Certificates: []tls.Certificate{cert},
-			}
-			tlsConfig.BuildNameToCertificate()
-		}
-		transport := &http.Transport{TLSClientConfig: tlsConfig}
-
-		// build destination request and copy headers
-		newreq, err := http.NewRequest(req.Method, end.String(), req.Body)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to create HTTP request: %s\n", err)
-			w.WriteHeader(599)
-			return
-		}
-
-		for header, values := range req.Header {
-			for _, value := range values {
-				w.Header().Add(header, value)
-			}
-		}
-
-		// dump request
-		requestsCounter.Inc(1)
-		fmt.Println("----- REQUEST ------")
-		if x, err := httputil.DumpRequestOut(newreq, !*onlyHeaders); err == nil {
-			fmt.Fprintf(os.Stderr, "%s\n", string(x))
-		}
-
-		// Do real request
-		client := &http.Client{
-			Transport: transport,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) > 10 {
-					return fmt.Errorf("stopped after 10 redirects")
+			for header, values := range via[0].Header {
+				for _, value := range values {
+					req.Header.Add(header, value)
 				}
-				for header, values := range via[0].Header {
-					for _, value := range values {
-						req.Header.Add(header, value)
-					}
-				}
-
-				fmt.Println("----- REDIRECT ------")
-				if x, err := httputil.DumpRequestOut(req, !*onlyHeaders); err == nil {
-					fmt.Fprintf(os.Stderr, "%s\n", string(x))
-				}
-				return nil
-			},
-		}
-
-		// build response
-		var res *http.Response
-		res, err = client.Do(newreq)
-
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to read response: %s\n", err)
-			w.WriteHeader(599)
-			failureCounter.Inc(1)
-			return
-		}
-
-		defer res.Body.Close()
-
-		if res.StatusCode == 200 {
-			successCounter.Inc(1)
-		} else {
-			failureCounter.Inc(1)
-		}
-
-		// Dump response - optionally with body
-		fmt.Println("----- RESPONSE ------")
-
-		if x, err := httputil.DumpResponse(res, !*onlyHeaders); err == nil {
-			fmt.Print(string(x))
-		}
-
-		// let response through
-		var b []byte
-		b, err = ioutil.ReadAll(res.Body)
-
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to read body: %s\n", err)
-			w.WriteHeader(599)
-			return
-		}
-		for header, values := range res.Header {
-			for _, value := range values {
-				w.Header().Add(header, value)
 			}
+
+			fmt.Println("----- REDIRECT ------")
+			if x, err := httputil.DumpRequestOut(req, !*onlyHeaders); err == nil {
+				fmt.Fprintf(os.Stderr, "%s\n", string(x))
+			}
+			return nil
+		},
+	}
+
+	// build response
+	var res *http.Response
+	res, err = client.Do(newreq)
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read response: %s\n", err)
+		w.WriteHeader(599)
+		failureCounter.Inc(1)
+		return
+	}
+
+	defer res.Body.Close()
+
+	if res.StatusCode == 200 {
+		successCounter.Inc(1)
+	} else {
+		failureCounter.Inc(1)
+	}
+
+	// Dump response - optionally with body
+	fmt.Println("----- RESPONSE ------")
+
+	if x, err := httputil.DumpResponse(res, !*onlyHeaders); err == nil {
+		fmt.Print(string(x))
+	}
+
+	// let response through
+	var b []byte
+	b, err = ioutil.ReadAll(res.Body)
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read body: %s\n", err)
+		w.WriteHeader(599)
+		return
+	}
+	for header, values := range res.Header {
+		for _, value := range values {
+			w.Header().Add(header, value)
 		}
-		w.WriteHeader(res.StatusCode)
-		w.Write(b)
-	})
-	http.ListenAndServe(*localAddr, nil)
+	}
+	w.WriteHeader(res.StatusCode)
+	w.Write(b)
 }
