@@ -144,7 +144,7 @@ func serve() {
 		fmt.Println("----- RESPONSE ------")
 
 		if x, err := httputil.DumpResponse(res, !*onlyHeaders); err == nil {
-			fmt.Printf(string(x))
+			fmt.Print(string(x))
 		}
 
 		// let response through
