@@ -86,6 +86,11 @@ func serve() {
 
 		// build destination request and copy headers
 		newreq, err := http.NewRequest(req.Method, end.String(), req.Body)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to create HTTP request: %s\n", err)
+			w.WriteHeader(599)
+			return
+		}
 
 		for header, values := range req.Header {
 			for _, value := range values {
