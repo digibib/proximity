@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -28,7 +27,7 @@ var (
 func main() {
 	flag.Parse()
 
-	fmt.Printf("Proxying from %v to %v\n\n", *localAddr, *remoteAddr)
+	log.Printf("Proxying from %v to %v\n\n", *localAddr, *remoteAddr)
 
 	go metrics.Log(metrics.DefaultRegistry, time.Duration(*metricsInterval)*time.Second, log.New(os.Stderr, "", 0))
 
@@ -44,7 +43,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 
 	end, err := url.Parse(req.URL.RequestURI())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to parse requested uri '%s': %s\n", req.URL, err)
+		log.Printf("failed to parse requested uri '%s': %s\n", req.URL, err)
 		w.WriteHeader(599)
 		return
 	}
@@ -52,19 +51,18 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	// target for proxy
 	target, err := url.Parse(*remoteAddr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to parse url: %s\n", err)
+		log.Printf("failed to parse url: %s\n", err)
 		w.WriteHeader(599)
 		return
 	}
-	fmt.Printf("%v\n", req.Host)
+	log.Printf("----- %v ------\n", req.Host)
 	if *verbosity > 0 {
-		fmt.Println("----- PARAMS ------")
+		log.Println("----- PARAMS ------")
 		args, _ := url.ParseQuery(req.URL.RawQuery)
 		for a, v := range args {
 			val, _ := url.QueryUnescape(v[0])
-			fmt.Fprintf(os.Stderr, "%s:\t%s\t\n", a, val)
+			log.Printf("%s:\t%s\t\n", a, val)
 		}
-		fmt.Println("-------------------")
 	}
 
 	// copy host + scheme to response
@@ -93,7 +91,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	// build destination request and copy headers
 	newreq, err := http.NewRequest(req.Method, end.String(), req.Body)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create HTTP request: %s\n", err)
+		log.Printf("failed to create HTTP request: %s\n", err)
 		w.WriteHeader(599)
 		return
 	}
@@ -108,8 +106,8 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	requestsCounter.Inc(1)
 	if *verbosity > 1 {
 		if x, err := httputil.DumpRequestOut(newreq, (*verbosity == 3)); err == nil {
-			fmt.Println("----- REQUEST ------")
-			fmt.Fprintf(os.Stderr, "%s\n", string(x))
+			log.Println("----- REQUEST ------")
+			log.Printf("%s", string(x))
 		}
 	}
 
@@ -118,7 +116,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > 10 {
-				return fmt.Errorf("stopped after 10 redirects")
+				log.Fatal("stopped after 10 redirects")
 			}
 			for header, values := range via[0].Header {
 				for _, value := range values {
@@ -127,9 +125,9 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 			}
 
 			if *verbosity >= 1 {
-				fmt.Println("----- REDIRECT ------")
+				log.Println("----- REDIRECT ------")
 				if x, err := httputil.DumpRequestOut(req, (*verbosity == 3)); err == nil {
-					fmt.Fprintf(os.Stderr, "%s\n", string(x))
+					log.Printf("%s", string(x))
 				}
 			}
 			return nil
@@ -141,7 +139,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	res, err = client.Do(newreq)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read response: %s\n", err)
+		log.Printf("failed to read response: %s\n", err)
 		w.WriteHeader(599)
 		failureCounter.Inc(1)
 		return
@@ -157,9 +155,9 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 
 	// Dump response - optionally with body
 	if *verbosity > 1 {
-		fmt.Println("----- RESPONSE ------")
+		log.Println("----- RESPONSE ------")
 		if x, err := httputil.DumpResponse(res, (*verbosity == 3)); err == nil {
-			fmt.Print(string(x))
+			log.Print(string(x))
 		}
 	}
 
@@ -168,7 +166,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	b, err = ioutil.ReadAll(res.Body)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read body: %s\n", err)
+		log.Printf("failed to read body: %s\n", err)
 		w.WriteHeader(599)
 		return
 	}
@@ -179,4 +177,5 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	}
 	w.WriteHeader(res.StatusCode)
 	w.Write(b)
+	log.Println("----- END ------")
 }
