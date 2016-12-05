@@ -16,12 +16,12 @@ import (
 )
 
 var (
-	metricsInterval = flag.Int("m", 5, "Interval of metrics logging")
+	metricsInterval = flag.Int("m", 60, "Interval of metrics logging")
 	certFile        = flag.String("cert", "cert.pem", "A PEM eoncoded certificate file.")
 	keyFile         = flag.String("key", "key.pem", "A PEM encoded private key file.")
 	localAddr       = flag.String("l", ":9999", "local address")
 	remoteAddr      = flag.String("r", "http://localhost:80", "remote address")
-	onlyHeaders     = flag.Bool("h", false, "dump only headers")
+	verbosity       = flag.Int("v", 0, "1: only params, 2: add request and response headers, 3: add request and response body")
 	noverify        = flag.Bool("no-verify", false, "Do not verify TLS/SSL certificates.")
 )
 
@@ -56,11 +56,15 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(599)
 		return
 	}
-
-	fmt.Println("----- PARAMS ------")
-	args, _ := url.ParseQuery(req.URL.RawQuery)
-	for a, v := range args {
-		fmt.Fprintf(os.Stderr, "%s:\t%s\t\n", a, v[0])
+	fmt.Printf("%v\n", req.Host)
+	if *verbosity > 0 {
+		fmt.Println("----- PARAMS ------")
+		args, _ := url.ParseQuery(req.URL.RawQuery)
+		for a, v := range args {
+			val, _ := url.QueryUnescape(v[0])
+			fmt.Fprintf(os.Stderr, "%s:\t%s\t\n", a, val)
+		}
+		fmt.Println("-------------------")
 	}
 
 	// copy host + scheme to response
@@ -102,9 +106,11 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 
 	// dump request
 	requestsCounter.Inc(1)
-	fmt.Println("----- REQUEST ------")
-	if x, err := httputil.DumpRequestOut(newreq, !*onlyHeaders); err == nil {
-		fmt.Fprintf(os.Stderr, "%s\n", string(x))
+	if *verbosity > 1 {
+		if x, err := httputil.DumpRequestOut(newreq, (*verbosity == 3)); err == nil {
+			fmt.Println("----- REQUEST ------")
+			fmt.Fprintf(os.Stderr, "%s\n", string(x))
+		}
 	}
 
 	// Do real request
@@ -120,9 +126,11 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 				}
 			}
 
-			fmt.Println("----- REDIRECT ------")
-			if x, err := httputil.DumpRequestOut(req, !*onlyHeaders); err == nil {
-				fmt.Fprintf(os.Stderr, "%s\n", string(x))
+			if *verbosity >= 1 {
+				fmt.Println("----- REDIRECT ------")
+				if x, err := httputil.DumpRequestOut(req, (*verbosity == 3)); err == nil {
+					fmt.Fprintf(os.Stderr, "%s\n", string(x))
+				}
 			}
 			return nil
 		},
@@ -148,10 +156,11 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Dump response - optionally with body
-	fmt.Println("----- RESPONSE ------")
-
-	if x, err := httputil.DumpResponse(res, !*onlyHeaders); err == nil {
-		fmt.Print(string(x))
+	if *verbosity > 1 {
+		fmt.Println("----- RESPONSE ------")
+		if x, err := httputil.DumpResponse(res, (*verbosity == 3)); err == nil {
+			fmt.Print(string(x))
+		}
 	}
 
 	// let response through
