@@ -55,13 +55,16 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(599)
 		return
 	}
-	log.Printf("----- %v ------\n", req.Host)
+	log.Printf("--> %v\n", req.Host)
 	if *verbosity > 0 {
 		log.Println("----- PARAMS ------")
-		args, _ := url.ParseQuery(req.URL.RawQuery)
-		for a, v := range args {
+		err := req.ParseForm()
+		if err != nil {
+			log.Fatal(err)
+		}
+		for k, v := range req.Form {
 			val, _ := url.QueryUnescape(v[0])
-			log.Printf("%s:\t%s\t\n", a, val)
+			log.Printf("%s:\t%s\t\n", k, val)
 		}
 	}
 
@@ -177,5 +180,5 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	}
 	w.WriteHeader(res.StatusCode)
 	w.Write(b)
-	log.Println("----- END ------")
+	log.Println("<-- END")
 }
