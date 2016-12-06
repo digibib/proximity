@@ -71,7 +71,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		// Load client cert
 		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("failed to load certificate: %s\n", err)
 		}
 
 		tlsConfig = &tls.Config{
