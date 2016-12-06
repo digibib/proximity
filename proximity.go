@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"flag"
 	"io/ioutil"
@@ -56,17 +57,6 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	log.Printf("--> %v\n", req.Host)
-	if *verbosity > 0 {
-		log.Println("----- PARAMS ------")
-		err := req.ParseForm()
-		if err != nil {
-			log.Fatal(err)
-		}
-		for k, v := range req.Form {
-			val, _ := url.QueryUnescape(v[0])
-			log.Printf("%s:\t%s\t\n", k, val)
-		}
-	}
 
 	// copy host + scheme to response
 	end.Host = target.Host
@@ -91,10 +81,14 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 
-	// build destination request and copy headers
-	newreq, err := http.NewRequest(req.Method, end.String(), req.Body)
+	// build destination request, clone body
+	buf, _ := ioutil.ReadAll(req.Body)
+	b1 := ioutil.NopCloser(bytes.NewBuffer(buf))
+	b2 := ioutil.NopCloser(bytes.NewBuffer(buf))
+
+	newreq, err := http.NewRequest(req.Method, end.String(), b1)
 	if err != nil {
-		log.Printf("failed to create HTTP request: %s\n", err)
+		log.Printf("failed to create new HTTP request: %s\n", err)
 		w.WriteHeader(599)
 		return
 	}
@@ -105,13 +99,26 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	// dump request
+	// dump request according to verbosity
 	requestsCounter.Inc(1)
-	if *verbosity > 1 {
-		if x, err := httputil.DumpRequestOut(newreq, (*verbosity == 3)); err == nil {
-			log.Println("----- REQUEST ------")
-			log.Printf("%s", string(x))
+	if *verbosity > 0 {
+		req.Body = b2 // return original body
+		log.Println("----- PARAMS ------")
+		err := req.ParseForm()
+		if err != nil {
+			log.Printf("failed to parse HTTP request params/formdata: %s\n", err)
 		}
+		for k, v := range req.Form {
+			val, _ := url.QueryUnescape(v[0])
+			log.Printf("%s:\t%s\t\n", k, val)
+		}
+		if *verbosity > 1 {
+			if x, err := httputil.DumpRequestOut(newreq, (*verbosity == 3)); err == nil {
+				log.Println("----- REQUEST ------")
+				log.Printf("%s", string(x))
+			}
+		}
+		req.Body = b2 // return original body
 	}
 
 	// Do real request
