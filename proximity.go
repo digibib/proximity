@@ -6,6 +6,7 @@ import (
 	"flag"
 	"io/ioutil"
 	"log"
+	"errors"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -25,12 +26,34 @@ var (
 	noverify        = flag.Bool("no-verify", false, "Do not verify TLS/SSL certificates.")
 )
 
+var transport *http.Transport
+
 func main() {
 	flag.Parse()
 
 	log.Printf("Proxying from %v to %v\n\n", *localAddr, *remoteAddr)
 
 	go metrics.Log(metrics.DefaultRegistry, time.Duration(*metricsInterval)*time.Second, log.New(os.Stderr, "", 0))
+
+	var tlsConfig *tls.Config
+
+	if *noverify {
+		tlsConfig = &tls.Config{InsecureSkipVerify: true}
+	} else {
+		// Load client cert
+		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+		if err != nil {
+			log.Printf("failed to load certificate: %s\n", err)
+		}
+
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+		tlsConfig.BuildNameToCertificate()
+	}
+
+	transport = &http.Transport{ TLSClientConfig: tlsConfig }
+
 
 	http.HandleFunc("/", proxy)
 	log.Fatal(http.ListenAndServe(*localAddr, nil))
@@ -61,25 +84,6 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	// copy host + scheme to response
 	end.Host = target.Host
 	end.Scheme = target.Scheme
-
-	// Setup tls transport
-	var tlsConfig *tls.Config
-
-	if *noverify {
-		tlsConfig = &tls.Config{InsecureSkipVerify: true}
-	} else {
-		// Load client cert
-		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
-		if err != nil {
-			log.Printf("failed to load certificate: %s\n", err)
-		}
-
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}
-		tlsConfig.BuildNameToCertificate()
-	}
-	transport := &http.Transport{TLSClientConfig: tlsConfig}
 
 	// build destination request, clone body
 	buf, _ := ioutil.ReadAll(req.Body)
@@ -126,7 +130,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > 10 {
-				log.Fatal("stopped after 10 redirects")
+				return errors.New("Too many redirects")
 			}
 			for header, values := range via[0].Header {
 				for _, value := range values {
