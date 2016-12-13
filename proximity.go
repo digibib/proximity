@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"flag"
 	"io/ioutil"
+	"strings"
+	"regexp"
 	"log"
 	"errors"
 	"net/http"
@@ -24,6 +26,7 @@ var (
 	remoteAddr      = flag.String("r", "http://localhost:80", "remote address")
 	verbosity       = flag.Int("v", 0, "1: only params, 2: add request and response headers, 3: add request and response body")
 	noverify        = flag.Bool("no-verify", false, "Do not verify TLS/SSL certificates.")
+	match           = flag.String("match", "", "Pattern to match in output")
 )
 
 var transport *http.Transport
@@ -119,7 +122,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 		if *verbosity > 1 {
 			if x, err := httputil.DumpRequestOut(newreq, (*verbosity == 3)); err == nil {
 				log.Println("----- REQUEST ------")
-				log.Printf("%s", string(x))
+				log.Printf("%s", applyMatcher(string(x)))
 			}
 		}
 		req.Body = b2 // return original body
@@ -141,7 +144,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 			if *verbosity >= 1 {
 				log.Println("----- REDIRECT ------")
 				if x, err := httputil.DumpRequestOut(req, (*verbosity == 3)); err == nil {
-					log.Printf("%s", string(x))
+					log.Printf("%s", applyMatcher(string(x)))
 				}
 			}
 			return nil
@@ -171,7 +174,7 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	if *verbosity > 1 {
 		log.Println("----- RESPONSE ------")
 		if x, err := httputil.DumpResponse(res, (*verbosity == 3)); err == nil {
-			log.Print(string(x))
+			log.Print(applyMatcher(string(x)))
 		}
 	}
 
@@ -192,4 +195,18 @@ func proxy(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(res.StatusCode)
 	w.Write(b)
 	log.Println("<-- END")
+}
+
+func applyMatcher(input string) string {
+	if input == "" {
+		return input
+	}
+	r, err := regexp.Compile(*match)
+	if err != nil {
+		log.Printf("Invalid match regex: %s", err)
+		return ""
+	}
+
+	matches := r.FindAllString(input, -1)
+	return strings.Join(matches, "\n")
 }
